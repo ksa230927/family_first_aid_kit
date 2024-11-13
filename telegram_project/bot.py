@@ -3,7 +3,7 @@ import django
 from dotenv import load_dotenv
 
 # Устанавливаем настройки Django до импорта моделей
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'telegram_project.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'telegram_project.telegram_project.settings')
 
 # Инициализация Django
 django.setup()
