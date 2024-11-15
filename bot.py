@@ -8,7 +8,7 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'telegram_project.settings')
 # Инициализация Django
 django.setup()
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters
 from django.conf import settings
 from telegram_data.models import TelegramMessage
@@ -21,51 +21,54 @@ load_dotenv()
 # Состояния для ConversationHandler
 CHOOSING, TYPING_NAME, TYPING_EXPIRY_DATE, TYPING_DISEASE_GROUP, TYPING_ORGAN_GROUP, SAVE_RECORD_IN_DB, TYPING_HTML_LINK = range(7)
 
-# Кнопки для inline-клавиатуры
-async def start(update, context):
-    print("start")
-    keyboard = [[InlineKeyboardButton("Добавить лекарство", callback_data='add_medicine')],
-                [InlineKeyboardButton("Просмотреть весь список", callback_data='view_list')]
-                ]
+async def handle_view_list(update, context):
+    keyboard = [
+        [InlineKeyboardButton("Показать полный список", callback_data='show_full_list')],
+        [InlineKeyboardButton("Показать список ссылок", callback_data='show_links')]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    # Отправляем приветственное сообщение с кнопкой
-    await update.message.reply_text('Привет! Выберите действие:', reply_markup=reply_markup)
-    # Устанавливаем флаг в context.user_data, чтобы напоминать пользователю
-    context.user_data['awaiting_input'] = 'button'  # Ожидаем нажатие кнопки
+
+    # Отправляем сообщение с выбором действия
+    await update.callback_query.message.reply_text(
+        "Выберите вариант:",
+        reply_markup=reply_markup
+    )
+    await update.callback_query.answer()  # Отвечаем на callback_query
+    return CHOOSING
+
+# Изменение обработчика callback_query: Теперь нам нужно добавить обработку разных кнопок,
+# чтобы на основе выбранного варианта показывать полный список или только ссылки.
+async def handle_callback_query(update, context):
+    query = update.callback_query
+    data = query.data
+
+    if data == 'show_full_list':
+        await view_list(update, context)
+    elif data == 'show_links':
+        await view_links(update, context)
 
     return CHOOSING
 
-# Обработка нажатия кнопки "Добавить лекарство"
-async def add_medicine(update, context):
-    print("add_medicine")
-    await update.callback_query.answer()  # Оповещаем о нажатии кнопки
-    await update.callback_query.message.reply_text("Введите наименование лекарства:")
-    # Устанавливаем флаг в context.user_data, что бот ожидает ввод
-    context.user_data['awaiting_input'] = 'name'  # Ожидаем наименование лекарства
-    return TYPING_NAME
-
 # Функция для отображения списка всех лекарств
 async def view_list(update, context):
-    print("view_list")
-
     medicines = await sync_to_async(list)(TelegramMessage.objects.all())
 
     if medicines:
         header = """
 <pre>
-<b>Название лекарства</b>             | <b>Срок годности</b>             | <b>Тип болезни</b>              | <b>Орган</b> 
+<b>Название лекарства</b>             | <b>Срок годности</b>| <b>Тип болезни</b>              | <b>Орган</b> 
 ------------------------------------------------------------------------------------------
 """
         message_text = header
         messages = []
 
         for medicine in medicines:
-            medicine_name = (medicine.medicine_name or "Не указано").ljust(30)
-            expiry_date = (str(medicine.expiry_date) or "Не указано").ljust(25)
-            disease_group = (medicine.DISEASE_GROUP or "Не указано").ljust(25)
-            ORGAN = (medicine.ORGAN or "Не указано").ljust(25)
+            medicine_name = (medicine.medicine_name or "Не задано").ljust(30)
+            expiry_date = (str(medicine.expiry_date) or "Не задано").ljust(12)
+            disease_group = (medicine.DISEASE_GROUP or "Не задано").ljust(25)
+            ORGAN = (medicine.ORGAN or "Не задано").ljust(25)
 
-            line = f"{medicine_name:<25} | {expiry_date:<15} | {disease_group:<20}| {ORGAN:<20}\n"
+            line = f"{medicine_name:<25} | {expiry_date:<12} | {disease_group:<20}| {ORGAN:<20}\n"
             # Проверяем длину сообщения, если приближаемся к лимиту, сохраняем текущий блок текста
             if len(message_text) + len(line) > 4000:
                 messages.append(message_text + "</pre>")
@@ -86,72 +89,230 @@ async def view_list(update, context):
 
     return CHOOSING
 
+# Функция для отображения списка ссылок (будет выполняться по кнопке "Показать список ссылок"):
+async def view_links(update, context):
+    medicines = await sync_to_async(list)(TelegramMessage.objects.all())
+
+    if medicines:
+        # Начинаем HTML-форматирование
+        message_text = "<b>Список лекарств и ссылок:</b>\n\n"
+
+        for medicine in medicines:
+            medicine_name = medicine.medicine_name or "Не задано"
+            html_link = medicine.HTML_LINK or "Не задано"
+
+            # Проверяем, если ссылка задана, то выводим ссылку, если нет — текст
+            if html_link != "Не задано":
+                message_text += f"🔹 <b>{medicine_name}</b>: <a href='{html_link}'>{html_link}</a>\n\n"
+            else:
+                message_text += f"🔹 <b>{medicine_name}</b>: Ссылка не задана\n\n"
+
+        # Закрываем HTML
+        message_text += "<i>Для получения информации кликните на Перейти.</i>"
+    else:
+        message_text = "В базе данных нет лекарств."
+
+    # Отправляем сообщение с ссылками
+    await update.callback_query.answer()
+    await update.callback_query.message.reply_text(message_text, parse_mode="HTML", disable_web_page_preview=True)
+
+    return CHOOSING
+# async def view_links(update, context):
+#     medicines = await sync_to_async(list)(TelegramMessage.objects.all())
+#
+#     if medicines:
+#         message_text = "<pre><b>Список лекарств и ссылок:</b>\n\n"
+#
+#         for medicine in medicines:
+#             medicine_name = medicine.medicine_name or "Не задано"
+#             html_link = medicine.HTML_LINK or "Не задано"
+#             message_text += f"{medicine_name} - <a href='{html_link}'>Ссылка</a>\n"
+#
+#         message_text += "</pre>"
+#     else:
+#         message_text = "В базе данных нет лекарств."
+#
+#     # Отправляем сообщение с ссылками
+#     await update.callback_query.answer()
+#     await update.callback_query.message.reply_text(message_text, parse_mode="HTML", disable_web_page_preview=False)
+#
+#     return CHOOSING
+
+# Стартовая функция
+async def start(update, context):
+    keyboard = [[InlineKeyboardButton("Добавить лекарство", callback_data='add_medicine')],
+                [InlineKeyboardButton("Просмотреть весь список", callback_data='view_list')]
+                ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    # Отправляем приветственное сообщение с кнопкой
+    await update.message.reply_text('Привет! Выберите действие:', reply_markup=reply_markup)
+    # Устанавливаем флаг в context.user_data, чтобы напоминать пользователю
+    context.user_data['awaiting_input'] = 'button'  # Ожидаем нажатие кнопки
+    return CHOOSING
+
+# Обработка нажатия кнопки "Добавить лекарство"
+async def add_medicine(update, context):
+    print("add_medicine")
+    await update.callback_query.answer()  # Оповещаем о нажатии кнопки
+    await update.callback_query.message.reply_text("Введите наименование лекарства:")
+    context.user_data['awaiting_input'] = 'name'  # Устанавливаем флаг в context.user_data, что бот ожидает ввод наименования лекарства
+    return TYPING_NAME
+
 # Обработка ввода наименования
 async def handle_name(update, context):
     print("handle_name")
     name = update.message.text
     context.user_data['name'] = name
+    text_in_chat_for_user = "Введите орган, который нужно лечить или нажмите 'Пропустить':"
+
     # Проверка, есть ли уже такое лекарство в базе данных
     existing_medicine = await sync_to_async(lambda: TelegramMessage.objects.filter(medicine_name=name).first())()
-
     if existing_medicine:
         # Если лекарство уже существует, сообщаем об этом и возвращаем на этап TYPING_NAME
         await update.message.reply_text(f"Лекарство с наименованием '{name}' уже существует в базе данных.")
         return TYPING_NAME  # Возвращаем на этап выбора действия
 
-    await update.message.reply_text("Введите орган, который нужно лечить:")
-    # Обновляем флаг, что бот теперь ожидает орган, который нужно лечить
-    context.user_data['awaiting_input'] = 'ORGAN'  # Ожидаем орган, который нужно лечить
+    # дальше идет подготовка к переходу на следующий шаг
+    await skip_button(update, context, text_in_chat_for_user, True)
+    context.user_data['awaiting_input'] = 'ORGAN'      # Обновляем флаг, что бот теперь ожидает орган, который нужно лечить
     return TYPING_ORGAN_GROUP
 
 # Обработка ввода органа, который лечит это лекарство
 async def handle_ORGAN(update, context):
     print("handle_ORGAN")
-    handle_ORGAN_text = update.message.text
-    context.user_data['ORGAN'] = handle_ORGAN_text
+    handle_ORGAN_text = "Не задано" if update.message.text == "Пропустить" else update.message.text
+    text_in_chat_for_user = "Введите тип болезни или нажмите 'Пропустить':"
 
-    await update.message.reply_text("Введите тип болезни:")
-    # Обновляем флаг, что бот теперь ожидает дату
-    context.user_data['awaiting_input'] = 'DISEASE_GROUP'  # Ожидаем дату
+    # Если на предыдущем шаге была нажата кнопка "Пропустить"
+    if update.message.text == "Пропустить":
+        return await skip_current_step(
+            update,
+            context,
+            'ORGAN',
+            TYPING_DISEASE_GROUP,
+            handle_ORGAN_text,
+            'DISEASE_GROUP',
+            text_in_chat_for_user
+        )
+    if update.message.text == "Выбрать из списка":
+        # Переход к выбору органа из списка
+        return await choose_organ_from_list(update, context)
+
+    context.user_data['ORGAN'] = handle_ORGAN_text
+    # дальше идет подготовка к переходу на следующий шаг
+    await skip_button(update, context, text_in_chat_for_user, False)
+    context.user_data['awaiting_input'] = 'DISEASE_GROUP'  # Обновляем флаг, что теперь ожидаем ввод типа болезни
     return TYPING_DISEASE_GROUP
+
+async def skip_current_step(update, context, current_step, next_step, default_value, next_input_flag, prompt_text):
+    """
+    Универсальная функция для пропуска шага с отправкой сообщения и клавиатуры.
+
+    :param update: Обновление от Telegram.
+    :param context: Контекст с данными пользователя.
+    :param current_step: Название текущего шага, из которого вызывается функция.
+    :param next_step: Название следующего шага, куда нужно перейти.
+    :param default_value: Значение по умолчанию, которое будет установлено в контексте.
+    :param next_input_flag: Следующий флаг ввода, который нужно установить.
+    :param prompt_text: Текст для запроса ввода (например, "Введите орган, который нужно лечить").
+    """
+    print("skip_step")
+    # Устанавливаем значение по умолчанию для текущего шага
+    context.user_data[current_step] = default_value
+    context.user_data['awaiting_input'] = next_input_flag  # Обновляем флаг ожидания ввода
+
+    create_choosing = False
+    if next_step == TYPING_ORGAN_GROUP:
+        create_choosing = True
+
+    # Если следующий шаг - TYPING_EXPIRY_DATE, не создаем клавиатуру с кнопкой "Пропустить"
+    if next_step != TYPING_EXPIRY_DATE:
+        await skip_button(update, context, prompt_text, create_choosing)
+    else:
+        # Просто отправляем текст без клавиатуры, если следующий шаг TYPING_EXPIRY_DATE
+        await update.message.reply_text(prompt_text)
+
+    # Возвращаем следующий шаг
+    return next_step
+
+async def skip_button(update, context, request_text, choose_from_list=False):
+    """
+    Функция для отправки запроса с кнопкой "Пропустить"
+
+    :param update: объект update из Telegram
+    :param context: объект context из Telegram
+    :param request_text: текст запроса, который будет отображаться пользователю
+    """
+    # print(update)
+    # Создаем клавиатуру с кнопкой "Пропустить"
+    # Ветвление для выбора клавиатуры
+    if choose_from_list:
+        keyboard = [["Пропустить", "Выбрать из списка"]]  # Для этапа выбора органа
+    else:
+        keyboard = [["Пропустить"]]  # Для других этапов
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+    # Проверяем тип update
+    if update.message:  # Когда update содержит сообщение
+        # Отправляем сообщение с запросом
+        await update.message.reply_text(
+            request_text,
+            reply_markup=reply_markup
+        )
+    elif update.callback_query:  # Когда update содержит callback_query
+        # Отправляем сообщение с запросом в ответ на callback_query
+        await update.callback_query.message.reply_text(
+            request_text,
+            reply_markup=reply_markup
+        )
+        # Ответ на callback_query, чтобы не было индикатора загрузки
+        await update.callback_query.answer()
 
 # Обработка ввода типа заболевания
 async def handle_DISEASE_GROUP(update, context):
     print("handle_DISEASE_GROUP")
-    DISEASE_GROUP_text = update.message.text
-    context.user_data['DISEASE_GROUP'] = DISEASE_GROUP_text
+    DISEASE_GROUP_text = "Не задано" if update.message.text == "Пропустить" else update.message.text
+    text_in_chat_for_user = "Введите срок годности лекарства (например, 01/12/2024):"
 
-    await update.message.reply_text("Введите срок годности лекарства (например, 01/12/2024):")
-    # Обновляем флаг, что бот теперь ожидает дату
-    context.user_data['awaiting_input'] = 'expiry_date'  # Ожидаем дату
+    # Если нажата кнопка "Пропустить"
+    if update.message.text == "Пропустить":
+        # print('вызов skip_step из handle_DISEASE_GROUP')
+        return await skip_current_step(
+            update,
+            context,
+            'DISEASE_GROUP',
+            TYPING_EXPIRY_DATE,
+            DISEASE_GROUP_text,
+            'expiry_date',
+            text_in_chat_for_user
+        )
+    context.user_data['DISEASE_GROUP'] = DISEASE_GROUP_text
+    # дальше идет подготовка к переходу на следующий шаг
+    await update.message.reply_text(text_in_chat_for_user)
+    context.user_data['awaiting_input'] = 'expiry_date'  # Обновляем флаг, что бот теперь ожидает дату
     return TYPING_EXPIRY_DATE
 
 # Обработка ввода срока годности
 async def handle_expiry(update, context):
     print("handle_expiry")
     expiry_date_str = update.message.text
-    context.user_data['expiry_date_str'] = expiry_date_str
+    text_in_chat_for_user = "Введите HTML ссылку на инструкцию к лекарству или нажмите 'Пропустить':"
 
-    # Преобразование строки даты
+    # Преобразование строки даты и проверка на корректность
+    context.user_data['expiry_date_str'] = expiry_date_str
     expiry_date = parse_expiry_date(expiry_date_str)
     if expiry_date is None:
         await update.message.reply_text("Неверный формат даты. Пожалуйста, используйте формат дд/мм/гггг.")
         return TYPING_EXPIRY_DATE
-
     context.user_data['expiry_date'] = expiry_date
 
-    await update.message.reply_text("Введите HTML ссылку на инструкцию к лекарству:")
-    # Обновляем флаг, что бот теперь ожидает дату
-    context.user_data['awaiting_input'] = 'HTML_LINK'  # Ожидаем дату
-
+    # дальше идет подготовка к переходу на следующий шаг
+    await skip_button(update, context, text_in_chat_for_user)
+    context.user_data['awaiting_input'] = 'HTML_LINK'      # Обновляем флаг, что бот теперь ожидает HTML_LINK
     return TYPING_HTML_LINK
-
-    # Автоматически вызываем handle_save_record
-    # return await handle_html_link(update, context)
 
 async def handle_html_link(update, context):
     print("handle_html_link")
-    HTML_LINK_text = update.message.text
+    HTML_LINK_text = "Не задано" if update.message.text == "Пропустить" else update.message.text
     context.user_data['HTML_LINK_text'] = HTML_LINK_text
 
     # Снимаем флаг ожидания ввода
@@ -222,6 +383,58 @@ async def handle_message(update, context):
         await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
     return CHOOSING
 
+# Эта функция обрабатывает выбор органа из списка.
+async def handle_organ_selection(update, context):
+    """
+    Обрабатывает выбор органа из списка.
+    """
+    print("handle_organ_selection вызвана")
+    # print(update)  # Отладочный вывод для анализа update
+
+    # Проверяем, есть ли callback_query
+    query = update.callback_query
+    if query:
+        try:
+            print("вошли в try в handle_organ_selection")
+            # Извлекаем данные из callback_data
+            selected_organ = query.data.split(":")[1]
+            context.user_data['ORGAN'] = selected_organ
+
+            # Уведомляем пользователя о выбранном органе
+            await query.answer(f"Вы выбрали: {selected_organ}") # Если вы хотите только уведомление (краткое всплывающее сообщение):
+            await query.message.reply_text(f"Вы выбрали: {selected_organ}") # Подходит для случаев, когда нужно сохранить историю действий пользователя в чате.
+
+            # Переход к следующему шагу
+            text_in_chat_for_user = "Введите тип болезни или нажмите 'Пропустить':"
+            await skip_button(update, context, text_in_chat_for_user)
+            context.user_data['awaiting_input'] = 'DISEASE_GROUP'
+
+            return TYPING_DISEASE_GROUP
+
+        except IndexError:
+            # Обработка ошибок в случае некорректных данных
+            await query.answer("Ошибка при выборе органа. Попробуйте еще раз.")
+            return ConversationHandler.END
+    else:
+        # Если нет callback_query, выводим сообщение в консоль для отладки
+        print("Ошибка: update.callback_query отсутствует")
+        await update.message.reply_text(
+            "Произошла ошибка. Попробуйте снова выбрать орган."
+        )
+        return ConversationHandler.END
+
+# Эта функция отправляет список кнопок с органами.
+async def choose_organ_from_list(update, context):
+    print("choose_organ_from_list")
+    print(update)
+    # Список доступных органов
+    organs = ["Орган 1", "Орган 2", "Орган 3"]
+    # Создаем клавиатуру с кнопками для каждого органа
+    keyboard = [[InlineKeyboardButton(organ, callback_data=f"select_organ:{organ}")] for organ in organs]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Выберите орган из списка:", reply_markup=reply_markup)
+    return CHOOSING
+
 # Главная функция с обработчиками
 def main():
     # Создаем экземпляр приложения бота
@@ -236,13 +449,22 @@ def main():
         states={
             CHOOSING: [
                 CallbackQueryHandler(add_medicine, pattern='^add_medicine$'),
-                CallbackQueryHandler(view_list, pattern='^view_list$'),
+                CallbackQueryHandler(handle_view_list, pattern='^view_list$'),
+                CallbackQueryHandler(handle_callback_query, pattern='^show_full_list$'),
+                CallbackQueryHandler(view_links, pattern='^show_links$'),
+                CallbackQueryHandler(handle_organ_selection, pattern='^select_organ:.*$'),
                 # Обработка нажатия кнопки "Добавить лекарство"
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)  # Обработка любого текстового сообщения
             ],
             TYPING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_name)],
-            TYPING_ORGAN_GROUP: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_ORGAN)],
-            TYPING_DISEASE_GROUP: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_DISEASE_GROUP)],
+            TYPING_ORGAN_GROUP: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_ORGAN),
+                # MessageHandler(filters.Regex("^Пропустить$"), skip_current_step),  # Обработка кнопки "Пропустить"
+            ],
+            TYPING_DISEASE_GROUP: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_DISEASE_GROUP),
+                # MessageHandler(filters.Regex("^Пропустить$"), skip_current_step),  # Обработка кнопки "Пропустить"
+            ],
             TYPING_EXPIRY_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expiry)],
             TYPING_HTML_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_html_link)],
             SAVE_RECORD_IN_DB: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_save_record)],
@@ -252,9 +474,6 @@ def main():
 
     # Добавляем обработчик к приложению
     application.add_handler(conv_handler)
-
-    # Добавляем обработчик для всех текстовых сообщений
-    # application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Запускаем бота
     application.run_polling()
