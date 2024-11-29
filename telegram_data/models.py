@@ -13,6 +13,8 @@ class TelegramMessage(models.Model):
     DISEASE_GROUP = models.CharField(max_length=255, null=True, blank=True) #  тип болезни
     ORGAN = models.CharField(max_length=255, null=True, blank=True) #  орган, который нужно лечить
     HTML_LINK = models.CharField(max_length=255, null=True, blank=True) #  ссылка на инструкцию к лекарству
+    quantity = models.IntegerField(null=True, blank=True)
+
 
     def __str__(self):
         return f"Message from {self.user_id} at {self.timestamp} - Medicine: {self.medicine_name or 'N/A'}"
