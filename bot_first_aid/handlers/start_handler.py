@@ -8,7 +8,7 @@ async def start(update, context):
     chat_ids.add(chat_id)
     print("start")
     keyboard = [[InlineKeyboardButton("Добавить лекарство", callback_data='add_medicine')],
-                [InlineKeyboardButton("Учет потребления", callback_data='uchet_potreblenia')],
+                [InlineKeyboardButton("Учет потребления", callback_data='uchet_potreblenia_vibor')],
                 [InlineKeyboardButton("Просмотреть весь список", callback_data='view_list')]
                 ]
     reply_markup = InlineKeyboardMarkup(keyboard)

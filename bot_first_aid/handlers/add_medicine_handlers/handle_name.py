@@ -1,4 +1,4 @@
-from bot_first_aid.globals import TYPING_quantity
+from bot_first_aid.globals import TYPING_quantity, TYPING_NAME
 from telegram_data.models import TelegramMessage
 from asgiref.sync import sync_to_async
 

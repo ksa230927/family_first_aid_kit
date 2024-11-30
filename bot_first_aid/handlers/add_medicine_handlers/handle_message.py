@@ -9,6 +9,7 @@ async def handle_message(update, context):
         # Создаем клавиатуру с кнопками
         keyboard = [
             [InlineKeyboardButton("Добавить лекарство", callback_data='add_medicine')],
+            [InlineKeyboardButton("Учет потребления", callback_data='uchet_potreblenia_vibor')],
             [InlineKeyboardButton("Просмотреть весь список", callback_data='view_list')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
