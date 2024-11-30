@@ -25,14 +25,6 @@ scheduler = BackgroundScheduler()
 # Загружаем переменные из .env файла
 load_dotenv()
 
-# функция пока не задейсвована (сейчас она аналогична cancel_input)
-# async def handle_q_cancel(update, context):
-#     print("handle_q_cancel")
-#     # Если пользователь вводит "q", выполняем cancel_input
-#     if update.message.text.lower() == 'q':
-#         await cancel_input(update, context)  # Вызываем функцию отмены
-#         return ConversationHandler.END
-
 # Вспомогательная функция для создания списка обработчиков
 def create_state_handlers(main_handler):
     return [
